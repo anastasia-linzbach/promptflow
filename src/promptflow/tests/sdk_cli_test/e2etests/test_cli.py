@@ -2091,8 +2091,13 @@ class TestCli:
             "--name",
             run_id,
         )
-        out, _ = capfd.readouterr()
-        assert "Completed" in out
+        original_run = local_client.runs.get(name=run_id)
+        assert original_run.status == "Completed"
+
+        output_path = os.path.join(original_run.properties["output_path"], "flow_outputs", "output.jsonl")
+        with open(output_path, "r") as file:
+            original_output = [json.loads(line) for line in file]
+        original_success_count = len(original_output)
 
         new_run_id = str(uuid.uuid4())
         display_name = "test"
@@ -2110,12 +2115,22 @@ class TestCli:
             "tags.A=A",
             "tags.B=B",
         )
-        run = local_client.runs.get(name=new_run_id)
-        assert run.name == new_run_id
-        assert run.display_name == display_name
-        assert run.description == description
-        assert run.tags == {"A": "A", "B": "B"}
-        assert run._resume_from == run_id
+        resume_run = local_client.runs.get(name=new_run_id)
+        output_path = os.path.join(resume_run.properties["output_path"], "flow_outputs", "output.jsonl")
+        with open(output_path, "r") as file:
+            resume_output = [json.loads(line) for line in file]
+        assert resume_run.name == new_run_id
+        assert resume_run.display_name == display_name
+        assert resume_run.description == description
+        assert resume_run.tags == {"A": "A", "B": "B"}
+        assert resume_run._resume_from == run_id
+
+        # assert new run resume from the original run
+        log_path = os.path.join(resume_run.properties["output_path"], "logs.txt")
+        with open(log_path, "r") as file:
+            log_text = file.read()
+        assert f"Skipped the execution of {original_success_count} existing results." in log_text
+        assert len(resume_output) > len(original_output)
 
     def test_flow_run_resume_partially_failed_run(self, capfd, local_client) -> None:
         run_id = str(uuid.uuid4())
@@ -2160,7 +2175,7 @@ class TestCli:
             )
             run_id = new_run_id
 
-    def test_flow_run_resume_from_token(self, capfd, local_client) -> None:
+    def test_flow_run_resume_with_token(self, local_client) -> None:
         run_id = str(uuid.uuid4())
         # fetch std out
         run_pf_command(
@@ -2175,58 +2190,12 @@ class TestCli:
             "--name",
             run_id,
         )
-        out, _ = capfd.readouterr()
-        assert "Completed" in out
         original_run = local_client.runs.get(name=run_id)
-
-        new_run_id = str(uuid.uuid4())
-        display_name = "test"
-        description = "new description"
-        run_pf_command(
-            "run",
-            "create",
-            "--resume-from",
-            run_id,
-            "--name",
-            new_run_id,
-            "--set",
-            f"display_name={display_name}",
-            f"description={description}",
-            "tags.A=A",
-            "tags.B=B",
-        )
-        resume_run = local_client.runs.get(name=new_run_id)
-        assert resume_run.name == new_run_id
-        assert resume_run.display_name == display_name
-        assert resume_run.description == description
-        assert resume_run.tags == {"A": "A", "B": "B"}
-        assert resume_run._resume_from == run_id
-        assert (
-            original_run.properties["system_metrics"]["total_tokens"]
-            <= resume_run.properties["system_metrics"]["total_tokens"]
-        )
-
-    def test_flow_run_resume_from_image_aggregation(self, capfd, local_client) -> None:
-        run_id = str(uuid.uuid4())
-        # fetch std out
-        run_pf_command(
-            "run",
-            "create",
-            "--flow",
-            f"{FLOWS_DIR}/eval_flow_with_image_resume_random_fail",
-            "--data",
-            f"{FLOWS_DIR}/eval_flow_with_image_resume_random_fail/data.jsonl",
-            "--column-mapping",
-            "input_image='${data.input_image}'",
-            "--name",
-            run_id,
-        )
-        out, _ = capfd.readouterr()
-        assert "Completed" in out
-        original_run = local_client.runs.get(name=run_id)
+        assert original_run.status == "Completed"
         output_path = os.path.join(original_run.properties["output_path"], "flow_outputs", "output.jsonl")
         with open(output_path, "r") as file:
             original_output = [json.loads(line) for line in file]
+        original_success_count = len(original_output)
 
         new_run_id = str(uuid.uuid4())
         display_name = "test"
@@ -2246,15 +2215,75 @@ class TestCli:
         )
         resume_run = local_client.runs.get(name=new_run_id)
         output_path = os.path.join(resume_run.properties["output_path"], "flow_outputs", "output.jsonl")
+        with open(output_path, "r") as file:
+            resume_output = [json.loads(line) for line in file]
+        assert resume_run.name == new_run_id
+        assert resume_run.display_name == display_name
+        assert resume_run.description == description
+        assert resume_run.tags == {"A": "A", "B": "B"}
+        assert resume_run._resume_from == run_id
 
+        # assert new run resume from the original run
+        log_path = os.path.join(resume_run.properties["output_path"], "logs.txt")
+        with open(log_path, "r") as file:
+            log_text = file.read()
+        assert f"Skipped the execution of {original_success_count} existing results." in log_text
+        assert len(resume_output) > len(original_output)
+        assert (
+            original_run.properties["system_metrics"]["total_tokens"]
+            < resume_run.properties["system_metrics"]["total_tokens"]
+        )
+
+    def test_flow_run_resume_with_image_aggregation(self, capfd, local_client) -> None:
+        run_id = str(uuid.uuid4())
+        # fetch std out
+        run_pf_command(
+            "run",
+            "create",
+            "--flow",
+            f"{FLOWS_DIR}/eval_flow_with_image_resume_random_fail",
+            "--data",
+            f"{FLOWS_DIR}/eval_flow_with_image_resume_random_fail/data.jsonl",
+            "--column-mapping",
+            "input_image='${data.input_image}'",
+            "--name",
+            run_id,
+        )
+        original_run = local_client.runs.get(name=run_id)
+        assert original_run.status == "Completed"
+        output_path = os.path.join(original_run.properties["output_path"], "flow_outputs", "output.jsonl")
+        with open(output_path, "r") as file:
+            original_output = [json.loads(line) for line in file]
+        original_success_count = len(original_output)
+
+        new_run_id = str(uuid.uuid4())
+        display_name = "test"
+        description = "new description"
+        run_pf_command(
+            "run",
+            "create",
+            "--resume-from",
+            run_id,
+            "--name",
+            new_run_id,
+            "--set",
+            f"display_name={display_name}",
+            f"description={description}",
+            "tags.A=A",
+            "tags.B=B",
+        )
+        resume_run = local_client.runs.get(name=new_run_id)
+        output_path = os.path.join(resume_run.properties["output_path"], "flow_outputs", "output.jsonl")
         with open(output_path, "r") as file:
             resume_output = [json.loads(line) for line in file]
 
-        # assert original_output in resume_output
-        original_output_line_numbers = {line["line_number"] for line in original_output}
-        resume_output_line_numbers = {line["line_number"] for line in resume_output}
-        assert original_output_line_numbers.issubset(resume_output_line_numbers)
-        assert len(resume_output) >= len(original_output)
+        # assert new run resume from the original run
+        log_path = os.path.join(resume_run.properties["output_path"], "logs.txt")
+        with open(log_path, "r") as file:
+            log_text = file.read()
+        assert f"Skipped the execution of {original_success_count} existing results." in log_text
+        assert len(resume_output) > len(original_output)
+
         assert resume_run.name == new_run_id
         assert resume_run.display_name == display_name
         assert resume_run.description == description
