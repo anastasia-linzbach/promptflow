@@ -160,10 +160,10 @@ class TestCommon:
         [
             ({"type": "function", "function": {"name": "my_function"}}, "", True),
             ({"type1": "function", "function": "123"}, 'tool_choice parameter {"type1": "function", "function": "123"} must contain "type" field', False),
-            ({"type": "function", "function": "123"}, "function parameter '123' in tool_choice must be a dict", False),
+            ({"type": "function", "function": "123"}, 'function parameter "123" in tool_choice must be a dict', False),
             (
                 {"type": "function", "function": {"name1": "get_current_weather"}},
-                'function parameter {"name1": "get_current_weather"} in tool_choice must contain "name" field',
+                'function parameter "{"name1": "get_current_weather"}" in tool_choice must contain "name" field',
                 False,
             ),
         ],
